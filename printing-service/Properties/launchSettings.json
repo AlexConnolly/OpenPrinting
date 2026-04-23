@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "printing-service": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

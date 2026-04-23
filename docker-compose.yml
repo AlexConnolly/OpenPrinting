@@ -1,0 +1,36 @@
+services:
+  api:
+    build:
+      context: ./console-api
+    restart: unless-stopped
+    volumes:
+      - db:/data
+    environment:
+      ASPNETCORE_URLS: "http://+:5184"
+      ConnectionStrings__Default: "Data Source=/data/openprinting.db"
+      Jwt__Secret: "${JWT_SECRET:-CHANGE_THIS_TO_A_SECURE_RANDOM_STRING_AT_LEAST_32_CHARACTERS_LONG}"
+      Jwt__Issuer: "OpenPrinting"
+      Jwt__Audience: "OpenPrintingConsole"
+      App__FrontendUrl: "${PUBLIC_URL:-http://localhost}"
+      App__ApiCallbackUrl: "${PUBLIC_URL:-http://localhost}/api/auth/oauth/callback"
+      Auth__AllowLocalLogin: "${ALLOW_LOCAL_LOGIN:-true}"
+      Auth__OAuth__ClientId: "${OAUTH_CLIENT_ID:-}"
+      Auth__OAuth__ClientSecret: "${OAUTH_CLIENT_SECRET:-}"
+      Auth__OAuth__AuthorizationUrl: "${OAUTH_AUTHORIZATION_URL:-}"
+      Auth__OAuth__TokenUrl: "${OAUTH_TOKEN_URL:-}"
+      Auth__OAuth__UserInfoUrl: "${OAUTH_USERINFO_URL:-}"
+      Auth__OAuth__Scopes: "${OAUTH_SCOPES:-openid email profile}"
+      Auth__OAuth__EmailClaim: "${OAUTH_EMAIL_CLAIM:-email}"
+      Auth__OAuth__NameClaim: "${OAUTH_NAME_CLAIM:-name}"
+
+  frontend:
+    build:
+      context: ./console-client
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  db:
