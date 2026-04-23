@@ -1,8 +1,25 @@
 services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-openprinting}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASS:-openprinting}"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: ./console-api
     restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - db:/data
     environment:
@@ -22,6 +39,9 @@ services:
       Auth__OAuth__Scopes: "${OAUTH_SCOPES:-openid email profile}"
       Auth__OAuth__EmailClaim: "${OAUTH_EMAIL_CLAIM:-email}"
       Auth__OAuth__NameClaim: "${OAUTH_NAME_CLAIM:-name}"
+      RabbitMq__Host: "${RABBITMQ_HOST:-rabbitmq}"
+      RabbitMq__User: "${RABBITMQ_USER:-openprinting}"
+      RabbitMq__Pass: "${RABBITMQ_PASS:-openprinting}"
 
   frontend:
     build:
@@ -34,3 +54,4 @@ services:
 
 volumes:
   db:
+  rabbitmq:

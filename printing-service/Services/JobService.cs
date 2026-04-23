@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Printing;
 using System.Net.Http.Json;
+using System.Net;
 using System.Text.Json;
 using PdfiumPrinter;
 
@@ -14,23 +15,20 @@ public class JobService
 
     public JobService(AgentService agent, IHttpClientFactory httpFactory, ILogger<JobService> logger)
     {
-        _agent = agent;
+        _agent       = agent;
         _httpFactory = httpFactory;
-        _logger = logger;
+        _logger      = logger;
     }
 
     public async Task<bool> ProcessNextAsync(string printerName, CancellationToken ct)
     {
-        if (_agent.AgentId is not { } agentId)
-            return false;
+        if (_agent.AgentId is not { } agentId) return false;
 
-        var client = _agent.ApiClient();
+        var client   = _agent.ApiClient();
         var response = await client.GetAsync(
             $"api/jobs/next?agentId={agentId}&printerName={Uri.EscapeDataString(printerName)}", ct);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
-            return false;
-
+        if (response.StatusCode == HttpStatusCode.NoContent) return false;
         response.EnsureSuccessStatusCode();
 
         var job = await response.Content.ReadFromJsonAsync<JobResponse>(cancellationToken: ct)
@@ -74,33 +72,30 @@ public class JobService
         using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         resp.EnsureSuccessStatusCode();
 
-        // Prefer the extension from the URL path; fall back to Content-Type header
         var ext = Path.GetExtension(new Uri(url).AbsolutePath);
         if (string.IsNullOrEmpty(ext))
             ext = ExtensionFromContentType(resp.Content.Headers.ContentType?.MediaType);
         if (string.IsNullOrEmpty(ext))
-            ext = Path.GetExtension(jobFileName); // last resort
+            ext = Path.GetExtension(jobFileName);
 
         var path = Path.Combine(Path.GetTempPath(), $"openprinting_{Guid.NewGuid()}{ext}");
         await using var file = File.Create(path);
         await resp.Content.CopyToAsync(file, ct);
-
-        _logger.LogInformation("Downloaded to {Path} ({Ext})", path, ext);
         return path;
     }
 
     private static string ExtensionFromContentType(string? mediaType) => mediaType switch
     {
-        "application/pdf"       => ".pdf",
-        "image/jpeg"            => ".jpg",
-        "image/png"             => ".png",
-        "image/gif"             => ".gif",
-        "image/bmp"             => ".bmp",
-        "image/tiff"            => ".tif",
-        "image/webp"            => ".webp",
-        "text/plain"            => ".txt",
-        "application/postscript"=> ".ps",
-        _                       => "",
+        "application/pdf"        => ".pdf",
+        "image/jpeg"             => ".jpg",
+        "image/png"              => ".png",
+        "image/gif"              => ".gif",
+        "image/bmp"              => ".bmp",
+        "image/tiff"             => ".tif",
+        "image/webp"             => ".webp",
+        "text/plain"             => ".txt",
+        "application/postscript" => ".ps",
+        _                        => "",
     };
 
     // ── Format dispatch ───────────────────────────────────────────────────────

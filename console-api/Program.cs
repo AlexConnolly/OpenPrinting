@@ -16,6 +16,17 @@ builder.Services.AddHttpClient();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=openprinting.db"));
 
+if (!string.IsNullOrWhiteSpace(builder.Configuration["RabbitMq:Host"]))
+{
+    builder.Services.AddSingleton<RabbitMqJobQueue>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<RabbitMqJobQueue>());
+    builder.Services.AddSingleton<IJobQueue>(sp => sp.GetRequiredService<RabbitMqJobQueue>());
+}
+else
+{
+    builder.Services.AddSingleton<IJobQueue, DbJobQueue>();
+}
+
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<OAuthService>(sp => new OAuthService(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient(),

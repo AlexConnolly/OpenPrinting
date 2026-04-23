@@ -24,10 +24,11 @@ OpenPrinting solves this by putting a job queue in the middle. You submit a file
 Browser / API client
       │
       ▼
-  console-api          ← ASP.NET Core API, SQLite, runs in Docker
-  console-client       ← React frontend, served via nginx in Docker
+  console-api          ← ASP.NET Core API, SQLite
+  console-client       ← React frontend, served via nginx
+  RabbitMQ             ← job queue, managed internally (all run in Docker)
       │
-      │  (polling over HTTPS)
+      │  HTTP polling (GET /jobs/next)
       ▼
   printing-service     ← Windows Worker Service, runs on the print machine
       │
@@ -36,9 +37,9 @@ Browser / API client
 ```
 
 1. You log in to the web console and submit a print job — either by uploading a file or providing a URL
-2. The job is queued in the API against a specific printer
-3. The printing service on the Windows machine polls the API, picks up the next job, and sends it to the printer
-4. The job is marked complete and appears in the history
+2. The API saves the job to the database and enqueues it in RabbitMQ (one durable queue per printer, managed entirely server-side)
+3. The printing service polls `GET /jobs/next` every 5 seconds — the API dequeues the next job and returns it
+4. The printing service prints the file and calls back to mark it complete or failed
 
 Multiple machines can each run their own printing service, and each registers its own printers. Jobs are scoped to your account — you only see your own printers and queue.
 
@@ -81,6 +82,8 @@ Open `.env` and fill in the values:
 | `OAUTH_AUTHORIZATION_URL` | For SSO | Authorization endpoint |
 | `OAUTH_TOKEN_URL` | For SSO | Token endpoint |
 | `OAUTH_USERINFO_URL` | For SSO | Userinfo endpoint |
+| `RABBITMQ_USER` | No | RabbitMQ username. Defaults to `openprinting` |
+| `RABBITMQ_PASS` | No | RabbitMQ password. Defaults to `openprinting` — change in production |
 
 Any OIDC-compatible provider works — Keycloak, Authentik, Auth0, Google, Azure AD, etc.
 
@@ -89,6 +92,18 @@ docker compose up -d
 ```
 
 The console will be at `http://localhost` (or whatever `PUBLIC_URL` is set to). On first visit, you'll be prompted to create an admin account.
+
+#### Bring your own queue
+
+RabbitMQ is bundled and managed automatically — you don't need to configure anything. If you want to use your own RabbitMQ instance instead, set these in `.env`:
+
+```
+RABBITMQ_HOST=your-rabbitmq-host
+RABBITMQ_USER=your-user
+RABBITMQ_PASS=your-password
+```
+
+The API will connect to your instance instead of the bundled one.
 
 ### 2. Set up the printing service
 
@@ -107,6 +122,11 @@ To point it at your server, edit `printing-service/appsettings.json`:
 {
   "PrintingService": {
     "ServerUrl": "https://your-server"
+  },
+  "RabbitMq": {
+    "Host": "your-server",
+    "User": "openprinting",
+    "Pass": "your-password"
   }
 }
 ```

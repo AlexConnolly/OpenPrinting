@@ -11,9 +11,9 @@ public class Worker : BackgroundService
 
     public Worker(AuthService auth, AgentService agent, JobService jobs, ILogger<Worker> logger)
     {
-        _auth = auth;
+        _auth  = auth;
         _agent = agent;
-        _jobs = jobs;
+        _jobs  = jobs;
         _logger = logger;
     }
 
@@ -30,7 +30,7 @@ public class Worker : BackgroundService
             return;
         }
 
-        _logger.LogInformation("Printing service running. Polling for jobs every 5s.");
+        _logger.LogInformation("Printing service ready. Polling for jobs every 5s.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -39,18 +39,11 @@ public class Worker : BackgroundService
                 await _auth.EnsureAuthenticatedAsync(stoppingToken);
                 await _agent.HeartbeatAsync(stoppingToken);
 
-                // Poll each known printer for work
                 foreach (var printer in _agent.PrinterNames)
                     await _jobs.ProcessNextAsync(printer, stoppingToken);
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in service loop.");
-            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex) { _logger.LogError(ex, "Error in polling loop."); }
 
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ContinueWith(_ => { });
         }

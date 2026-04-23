@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using console_api.Data;
 using console_api.Models;
+using console_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,15 +14,19 @@ namespace console_api.Controllers;
 public class JobsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IJobQueue _queue;
 
-    public JobsController(AppDbContext db) => _db = db;
+    public JobsController(AppDbContext db, IJobQueue queue)
+    {
+        _db    = db;
+        _queue = queue;
+    }
 
     private int CurrentUserId =>
         int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
-    // Accepts either a file upload OR a source URL — not both, not neither.
     [HttpPost]
-    [RequestSizeLimit(52_428_800)] // 50 MB cap for file uploads
+    [RequestSizeLimit(52_428_800)]
     public async Task<IActionResult> Submit([FromForm] SubmitJobForm form)
     {
         var hasFile = form.File is { Length: > 0 };
@@ -51,13 +56,13 @@ public class JobsController : ControllerBase
 
             job = new PrintJob
             {
-                AgentId    = form.AgentId,
+                AgentId     = form.AgentId,
                 PrinterName = form.PrinterName,
-                FileName   = fileName,
-                FileData   = Array.Empty<byte>(),
-                SourceUrl  = form.SourceUrl!.Trim(),
-                Status     = JobStatus.Pending,
-                CreatedAt  = DateTime.UtcNow,
+                FileName    = fileName,
+                FileData    = Array.Empty<byte>(),
+                SourceUrl   = form.SourceUrl!.Trim(),
+                Status      = JobStatus.Pending,
+                CreatedAt   = DateTime.UtcNow,
             };
         }
         else
@@ -78,6 +83,11 @@ public class JobsController : ControllerBase
 
         _db.PrintJobs.Add(job);
         await _db.SaveChangesAsync();
+
+        // Publish to queue (RabbitMQ when running in Docker; no-op otherwise — DB polling handles it)
+        _queue.Publish(agent.Id, job.PrinterName, new PrintJobMessage(
+            job.Id, job.PrinterName, job.FileName, job.SourceUrl));
+
         return Ok(Summarise(job));
     }
 
@@ -113,12 +123,30 @@ public class JobsController : ControllerBase
 
         if (!agentBelongsToUser) return Forbid();
 
-        var job = await _db.PrintJobs
-            .Where(j => j.AgentId == agentId && j.PrinterName == printerName && j.Status == JobStatus.Pending)
-            .OrderBy(j => j.CreatedAt)
-            .FirstOrDefaultAsync();
+        PrintJob? job;
 
-        if (job == null) return NoContent();
+        var queued = _queue.TryDequeue(agentId, printerName);
+        if (queued != null)
+        {
+            // RabbitMQ mode — job came from the queue, load it from DB to update status
+            job = await _db.PrintJobs.FindAsync(queued.JobId);
+            if (job == null) return NoContent();
+        }
+        else if (_queue is DbJobQueue)
+        {
+            // Polling mode — query the DB directly
+            job = await _db.PrintJobs
+                .Where(j => j.AgentId == agentId && j.PrinterName == printerName && j.Status == JobStatus.Pending)
+                .OrderBy(j => j.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (job == null) return NoContent();
+        }
+        else
+        {
+            // RabbitMQ mode but queue is empty
+            return NoContent();
+        }
 
         job.Status    = JobStatus.Printing;
         job.StartedAt = DateTime.UtcNow;
@@ -130,7 +158,6 @@ public class JobsController : ControllerBase
             job.PrinterName,
             job.FileName,
             job.SourceUrl,
-            // Only send file data for uploaded jobs — URL jobs download direct
             FileData = job.SourceUrl == null ? Convert.ToBase64String(job.FileData) : null,
         });
     }
